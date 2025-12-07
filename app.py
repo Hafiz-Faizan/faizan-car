@@ -160,19 +160,27 @@ def predict_single_model(image_batch, model_name, model_info, features_flat=None
 def predict_all_models(image):
     """Make predictions using ALL models"""
     
-    available_models = get_available_models()
-    
-    # Preprocess image
-    img = cv2.resize(image, (IMG_HEIGHT, IMG_WIDTH))
-    if len(img.shape) == 2:  # Grayscale
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    img_normalized = img / 255.0
-    img_batch = np.expand_dims(img_normalized, axis=0)
-    
-    # Extract features for ML models
-    extractor = get_feature_extractor()
-    features = extractor.predict(img_batch, verbose=0)
-    features_flat = features.reshape(1, -1)
+    try:
+        available_models = get_available_models()
+        
+        if not available_models:
+            st.error("⚠️ No trained models found. Please upload model files (.h5 or .pkl)")
+            return []
+        
+        # Preprocess image
+        img = cv2.resize(image, (IMG_HEIGHT, IMG_WIDTH))
+        if len(img.shape) == 2:  # Grayscale
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        img_normalized = img / 255.0
+        img_batch = np.expand_dims(img_normalized, axis=0)
+        
+        # Extract features for ML models
+        extractor = get_feature_extractor()
+        features = extractor.predict(img_batch, verbose=0)
+        features_flat = features.reshape(1, -1)
+    except Exception as e:
+        st.error(f"❌ Error preprocessing image: {str(e)}")
+        return []
     
     # Predict with all models
     results = []
@@ -243,44 +251,53 @@ with col1:
             with st.spinner("Analyzing with 14 models..."):
                 results = predict_all_models(image)
                 
-                df = pd.DataFrame(results)
-                successful_df = df[df['status'] == 'success'].copy()
-                
-                if len(successful_df) > 0:
-                    df = successful_df.sort_values('confidence', ascending=False)
-                    
-                    with col2:
-                        st.markdown("### 📊 Analysis Results")
-                        
-                        damage_count = (df['prediction'] == '00-damage').sum()
-                        fine_count = (df['prediction'] == '01-all-fine').sum()
-                        majority_vote = 'Damage' if damage_count > fine_count else 'All Fine'
-                        vote_emoji = "🔴" if damage_count > fine_count else "🟢"
-                        
-                        st.markdown(f"## {vote_emoji} Consensus: **{majority_vote.upper()}**")
-                        st.markdown(f"**Vote:** {damage_count} Damage | {fine_count} All Fine")
-                        
-                        st.markdown("### 🏆 Top 3 Models")
-                        for idx, row in df.head(3).iterrows():
-                            emoji = "🔴" if 'damage' in row['prediction'] else "🟢"
-                            pred_label = "Damage" if 'damage' in row['prediction'] else "All Fine"
-                            st.markdown(f"**{row['model']}** ({row['type']})")
-                            st.markdown(f"{emoji} {pred_label} - {row['confidence']:.2%} confidence")
-                        
-                        st.markdown("### 📋 All Models Results")
-                        display_df = pd.DataFrame({
-                            'Model': df['model'],
-                            'Type': df['type'],
-                            'Prediction': df['prediction'].apply(lambda x: "🔴 Damage" if 'damage' in x else "🟢 All Fine"),
-                            'Confidence': df['confidence'].apply(lambda x: f"{x:.2%}"),
-                            'Damage': df['damage_prob'].apply(lambda x: f"{x:.2%}"),
-                            'All Fine': df['fine_prob'].apply(lambda x: f"{x:.2%}")
-                        })
-                        st.dataframe(display_df, use_container_width=True, hide_index=True)
-                        
-                        st.success(f"✅ Successfully analyzed with {len(results)} models!")
+                # Check if results is valid
+                if not results or len(results) == 0:
+                    st.error("❌ No models available or all models failed to load")
                 else:
-                    st.error("❌ All models failed to make predictions")
+                    df = pd.DataFrame(results)
+                    
+                    # Safely filter successful results
+                    if 'status' in df.columns:
+                        successful_df = df[df['status'] == 'success'].copy()
+                    else:
+                        successful_df = df.copy()  # Assume all are successful if no status column
+                    
+                    if len(successful_df) > 0:
+                        df = successful_df.sort_values('confidence', ascending=False)
+                        
+                        with col2:
+                            st.markdown("### 📊 Analysis Results")
+                            
+                            damage_count = (df['prediction'] == '00-damage').sum()
+                            fine_count = (df['prediction'] == '01-all-fine').sum()
+                            majority_vote = 'Damage' if damage_count > fine_count else 'All Fine'
+                            vote_emoji = "🔴" if damage_count > fine_count else "🟢"
+                            
+                            st.markdown(f"## {vote_emoji} Consensus: **{majority_vote.upper()}**")
+                            st.markdown(f"**Vote:** {damage_count} Damage | {fine_count} All Fine")
+                            
+                            st.markdown("### 🏆 Top 3 Models")
+                            for idx, row in df.head(3).iterrows():
+                                emoji = "🔴" if 'damage' in row['prediction'] else "🟢"
+                                pred_label = "Damage" if 'damage' in row['prediction'] else "All Fine"
+                                st.markdown(f"**{row['model']}** ({row['type']})")
+                                st.markdown(f"{emoji} {pred_label} - {row['confidence']:.2%} confidence")
+                            
+                            st.markdown("### 📋 All Models Results")
+                            display_df = pd.DataFrame({
+                                'Model': df['model'],
+                                'Type': df['type'],
+                                'Prediction': df['prediction'].apply(lambda x: "🔴 Damage" if 'damage' in x else "🟢 All Fine"),
+                                'Confidence': df['confidence'].apply(lambda x: f"{x:.2%}"),
+                                'Damage': df['damage_prob'].apply(lambda x: f"{x:.2%}"),
+                                'All Fine': df['fine_prob'].apply(lambda x: f"{x:.2%}")
+                            })
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
+                            
+                            st.success(f"✅ Successfully analyzed with {len(results)} models!")
+                    else:
+                        st.error("❌ All models failed to make predictions")
 
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: gray;'>🎓 ML Course Project | 14 Models Trained & Deployed | Car Damage Detection System</p>", unsafe_allow_html=True)
